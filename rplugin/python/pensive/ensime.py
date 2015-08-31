@@ -162,7 +162,7 @@ class SymbolInfo(object):
         self.decl_pos = SourcePosition.fromJson(payload.get('declPos'))
         self.type = TypeInfo.fromJson(payload['type'])
         self.is_callable = payload['isCallable']
-        self.owner_type_id = payload['ownerTypeId']
+        self.owner_type_id = payload.get('ownerTypeId')
 
     def run(self, vim):
         vim.command("sp %s" % self.decl_pos.file)
