@@ -6,61 +6,11 @@ import logging
 import sexp
 import neovim
 import json
+import ensime
 
 
-class SymbolAtPoint(object):
-    name = "SymbolAtPointReq"
-    request = None
-    response = None
-
-    def create_request(self, path, pos):
-        self.request = {
-            "typehint": "SymbolAtPointReq",
-            "file": path,
-            "point": pos
-        }
-        return json.dumps(self.request)
-
-    def parse_response(self, response):
-        self.response = json.loads(response)
-
-
-class EnsimeCommands(object):
-    def connection_info(self):
-        return "(swank:connection-info)"
-
-    def init_project(self):
-        return "(swank:init-project)"
-
-    def type_check_file(self, path):
-        return "(swank:typecheck-file (:file \"{0}\"))".format(path)
-
-    def type_at_point(self, path, line_offset, colnum):
-        char_offset = int(line_offset) + int(colnum) - 1
-        return '(swank:type-at-point "{0}" {1})'.format(path, char_offset)
-
-    def inspect_type_at_point(self, path, line_offset, colnum):
-        char_offset = int(line_offset) + int(colnum) - 1
-        return '(swank:inspect-type-at-point "{0}" {1})'.format(
-            path, char_offset
-        )
-
-    def symbol_at_point(self, path, line_offset, colnum):
-        char_offset = int(line_offset) + int(colnum) - 1
-        return '(swank:symbol-at-point "{0}" {1})'.format(path, char_offset)
-
-    def doc_at_point(self, path, line_offset, colnum):
-        char_offset = int(line_offset) + int(colnum) - 1
-        return '(swank:doc-uri-at-point "{0}" {1})'.format(path, char_offset)
-
-    def uses_of_symbol_at_point(self, path, line_offset, colnum):
-        char_offset = int(line_offset) + int(colnum) - 1
-        return '(swank:uses-of-symbol-at-point "{0}" {1})'.format(
-            path, char_offset
-        )
-
-    def type_check_all(self):
-        return '(swank:typecheck-all)'
+def calculate_offset(line_offset, colnum):
+    return int(line_offset) + int(colnum) - 1
 
 
 class SocketClientThread(threading.Thread):
@@ -94,7 +44,7 @@ class SocketClientThread(threading.Thread):
                 # if response:
                 #     continue
                 i, o, e = select.select([self.socket], [], [], 0)
-                self.logger.debug('input from select %s' % str(i))
+                # self.logger.debug('input from select %s' % str(i))
                 for s in i:
                     if s == self.socket:
                         self._recv(None)
@@ -104,21 +54,23 @@ class SocketClientThread(threading.Thread):
                 self.logger.debug('data: %s' % data)
                 self.handlers[cmd](data)
             except Queue.Empty:
-                self.logger.debug('empty queue exception')
+                # self.logger.debug('empty queue exception')
                 continue
             except Exception as e:
                 self.logger.debug("other exception: %s" % str(e))
                 continue
 
     def _send(self, command):
-        wrapped_command = "(:swank-rpc {0} {1})".format(
-            command, self.command_counter
+        command_name = command.pop('__name__')
+        wrapped_command = json.dumps(
+            {"callId": self.command_counter, "req": command}
         )
         request = "{0}{1}".format(
             "%06x" % len(wrapped_command), wrapped_command
         )
         self.logger.debug(request)
         self.socket.send(request)
+        self.history[self.command_counter] = command_name
         self.command_counter += 1
 
     def _recv(self, command):
@@ -174,43 +126,39 @@ class SocketClientThread(threading.Thread):
         self.logger.debug('calling update')
         result = self.output_queue.get()
         self.logger.debug('output queue result: %s' % str(result))
+        parsed_command = json.loads(result)
+        command_id = None
+        command_type = parsed_command['typehint']
+        if command_type == 'RpcResponseEnvelope':
+            command_id = parsed_command['callId']
+
+        command = None
+        if command_id is not None:
+            command_name = self.history[command_id]
+            command = getattr(ensime, command_name)()
+
         output_buffer = [
             b for b in self.vim.buffers if b.name.endswith("pensive")
         ][0]
         output = result
 
         try:
-            self.response_symbol_at_point(result)
-        except:
-            pass
+            output_buffer.append('start')
+            output_buffer.append(str(command.__class__.__name__))
+            output_buffer.append('creating response')
+            output_buffer.append(
+                str(command.response(parsed_command['payload']))
+            )
+            command.response(
+                parsed_command['payload']
+            ).run(self.vim)
 
-        try:
-            output = self.response_type_at_point(result)
-
-            # output_buffer.append(str(key_map[':decl-pos']))
-            # if key_map[':decl-pos']:
-            #     pos_map = sexp.sexp_to_key_map(key_map[':decl-pos'])
-            #     output_buffer.append(str(pos_map))
-            #     filepath = pos_map.get(':file')
-            #     output_buffer.append(str(filepath))
-            #     offset = self.vim.eval(
-            #         'byte2line({0})'.format(
-            #             int(pos_map.get(':offset'))
-            #         )
-            #     )
-            #     output_buffer.append(str(offset))
-            #     llist = (
-            # 'setloclist(0, [{"filename": "%s", "lnum": %d, "text": "%s"}])'
-            #     ) % (filepath, offset, 'go here')
-            #     output_buffer.append(llist)
-            #     self.vim.eval(llist)
-
-        except:
-            pass
+            output_buffer.append('end')
+        except Exception as e:
+            output_buffer.append(str(e))
 
         output_buffer.append(result)
         output_buffer.append(output)
-        # self.vim.current.line = result
 
     def _connect(self, project_dir):
         line = open(
@@ -264,13 +212,13 @@ class EnsimePlugin(object):
 
     @neovim.command("EnsimeTypecheckAll", sync=True)
     def command_typecheck_all(self):
-        command = EnsimeCommands().type_check_all()
+        command = ensime.TypecheckAll().request()
         self.input_queue.put(('send', command))
 
     @neovim.command("EnsimeTypecheckFile", sync=True)
     def command_typecheck_file(self):
         filename = self.vim.current.buffer.name
-        command = EnsimeCommands().type_check_file(filename)
+        command = ensime.TypecheckFile().request(filename)
         self.input_queue.put(('send', command))
 
     @neovim.command("EnsimeTypeAtPoint", sync=False)
@@ -278,20 +226,8 @@ class EnsimePlugin(object):
         filename = self.vim.current.buffer.name
         line_number, col_number = self.vim.eval('getpos(".")')[1:3]
         line_byte_pos = self.vim.eval('line2byte({0})'.format(line_number))
-        command = EnsimeCommands().type_at_point(
-            filename, line_byte_pos, col_number
-        )
-        self.input_queue.put(('send', command))
-
-    @neovim.command("EnsimeInspectTypeAtPoint", sync=False)
-    def command_inspect_type_at_point(self):
-        filename = self.vim.current.buffer.name
-        line_number, col_number = self.vim.eval('getpos(".")')[1:3]
-        line_byte_pos = self.vim.eval('line2byte({0})'.format(line_number))
-        command = EnsimeCommands().inspect_type_at_point(
-            filename, line_byte_pos, col_number
-        )
-        self.logger.debug('type_at_point: %s' % command)
+        command = ensime.TypeAtPoint().request(
+            filename, calculate_offset(line_byte_pos, col_number))
         self.input_queue.put(('send', command))
 
     @neovim.command("EnsimeSymbolAtPoint", sync=False)
@@ -299,20 +235,32 @@ class EnsimePlugin(object):
         filename = self.vim.current.buffer.name
         line_number, col_number = self.vim.eval('getpos(".")')[1:3]
         line_byte_pos = self.vim.eval('line2byte({0})'.format(line_number))
-        command = EnsimeCommands().symbol_at_point(
-            filename, line_byte_pos, col_number
+        command = ensime.SymbolAtPoint().request(
+            filename, calculate_offset(line_byte_pos, col_number)
         )
+        self.logger.debug(command)
         self.input_queue.put(('send', command))
 
-    @neovim.command("EnsimeSymbolUsesAtPoint", sync=False)
+    @neovim.command("EnsimeUsesOfSymbolAtPoint", sync=False)
     def command_uses_of_symbol_at_point(self):
         filename = self.vim.current.buffer.name
         line_number, col_number = self.vim.eval('getpos(".")')[1:3]
         line_byte_pos = self.vim.eval('line2byte({0})'.format(line_number))
-        command = EnsimeCommands().uses_of_symbol_at_point(
-            filename, line_byte_pos, col_number
+        command = ensime.UsesOfSymbolAtPoint().request(
+            filename, calculate_offset(line_byte_pos, col_number)
         )
-        self.logger.debug('type_at_point: %s' % command)
+        self.logger.debug(command)
+        self.input_queue.put(('send', command))
+
+    @neovim.command("EnsimeImplicitInfo", sync=False)
+    def command_implicit_info(self):
+        filename = self.vim.current.buffer.name
+        line_number, col_number = self.vim.eval('getpos(".")')[1:3]
+        start = self.vim.eval('line2byte({0})'.format(line_number))
+        end = start + len(self.vim.current.line) - 1
+        command = ensime.ImplicitInfo().request(
+            filename, start, end
+        )
         self.input_queue.put(('send', command))
 
 
