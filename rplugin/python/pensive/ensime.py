@@ -191,6 +191,20 @@ class UnloadAll(object):
         return self._response
 
 
+class TypecheckAll(object):
+    typehint = "TypecheckAllReq"
+    _request = None
+    _response = None
+
+    def request(self):
+        self._request = {"typehint": self.typehint}
+        return add_class_name(self._request, self)
+
+    def response(self, payload):
+        self._response = json.loads(payload)
+        return self._response
+
+
 class TypecheckFile(object):
     typehint = "TypecheckFileReq"
     _request = None
