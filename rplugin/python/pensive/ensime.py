@@ -126,7 +126,8 @@ class ArrowTypeInfo(TypeInfo):
 
 
 class SourcePosition(ResponseType):
-    pass
+    def goto(self, vim):
+        pass
 
 
 class EmptySourcePosition(SourcePosition):
@@ -140,6 +141,10 @@ class OffsetSourcePosition(SourcePosition):
         self.file = payload['file']
         self.offset = payload['offset']
 
+    def goto(self, vim):
+        vim.command("sp %s" % self.file)
+        vim.command("%dgo" % self.offset)
+
     @classmethod
     def handles(cls, payload):
         return 'offset' in payload
@@ -149,6 +154,10 @@ class LineSourcePosition(SourcePosition):
     def __init__(self, payload):
         self.file = payload['file']
         self.line = payload['line']
+
+    def goto(self, vim):
+        vim.command("sp %s" % self.file)
+        vim.command("%dG" % self.line)
 
     @classmethod
     def handles(cls, payload):
@@ -165,11 +174,19 @@ class SymbolInfo(object):
         self.owner_type_id = payload.get('ownerTypeId')
 
     def run(self, vim):
-        vim.command("sp %s" % self.decl_pos.file)
-        if isinstance(self.decl_pos, OffsetSourcePosition):
-            vim.command("%dgo" % self.decl_pos.offset)
-        if isinstance(self.decl_pos, LineSourcePosition):
-            vim.command("%dG" % self.decl_pos.line)
+        # if the symbol declaration is the same as the type position
+        # just go to the declaration position
+        df = getattr(self.decl_pos, 'file', False)
+        tf = getattr(self.type, 'file', False)
+
+        if df and tf and df == tf:
+            self.decl_pos.goto(vim)
+        else:
+            if self.decl_pos:
+                self.decl_pos.goto(vim)
+            # open a split with type declaration
+            if self.type and self.type.pos:
+                self.type.pos.goto(vim)
 
 
 def add_class_name(d, cls):
