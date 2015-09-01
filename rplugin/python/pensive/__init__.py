@@ -210,6 +210,11 @@ class EnsimePlugin(object):
         )
         self.client.start()
 
+    @neovim.command("EnsimeUnloadAll", sync=True)
+    def command_unload_all(self):
+        command = ensime.UnloadAll().request()
+        self.input_queue.put(('send', command))
+
     @neovim.command("EnsimeTypecheckAll", sync=True)
     def command_typecheck_all(self):
         command = ensime.TypecheckAll().request()

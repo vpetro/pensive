@@ -177,8 +177,8 @@ def add_class_name(d, cls):
     return d
 
 
-class TypecheckAll(object):
-    typehint = "TypecheckAllReq"
+class UnloadAll(object):
+    typehint = "UnloadAllReq"
     _request = None
     _response = None
 
