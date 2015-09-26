@@ -3,7 +3,6 @@ import threading
 import Queue
 import os.path
 import logging
-import sexp
 import neovim
 import json
 import ensime
@@ -97,28 +96,6 @@ class SocketClientThread(threading.Thread):
             return response
         return 'invalid message'
 
-    def response_symbol_at_point(self, response):
-        key_map = sexp.sexp_to_key_map(sexp.read(response)[1][1])
-        pos_map = sexp.sexp_to_key_map(key_map[':decl-pos'])
-        filepath = pos_map.get(':file')
-        offset = int(pos_map.get(':offset'))
-
-        self.vim.command("sp %s" % filepath)
-        self.vim.command("%dgo" % offset)
-
-    def response_type_at_point(self, response):
-        key_map = sexp.sexp_to_key_map(sexp.read(response)[1][1])
-        output = key_map.get(':name', 'Not available')
-        if not key_map[':arrow-type'] and key_map[':type-args']:
-            type_maps = [
-                sexp.sexp_to_key_map(t) for t in key_map[':type-args']
-            ]
-            type_names = [str(t[':name']) for t in type_maps]
-            output = "%s[%s]" % (
-                key_map[':name'], ", ".join(type_names)
-            )
-        return output
-
     def _update(self):
         self.logger.debug('calling update')
         result = self.output_queue.get()
@@ -170,7 +147,6 @@ class SocketClientThread(threading.Thread):
         self.logger.debug('connected to server')
 
     def join(self, timeout=None):
-        # self.alive.clear()
         threading.Thread.join(self, timeout)
 
 
@@ -179,20 +155,21 @@ class EnsimePlugin(object):
     def __init__(self, vim):
         self.vim = vim
         self.project_dir = os.path.abspath(os.path.curdir)
+        self.plugin_dir = os.path.dirname(os.path.realpath(__file__))
         self.input_queue = Queue.Queue()
         self.output_queue = Queue.Queue()
 
         self.logger = logging.getLogger(str(self.__class__))
         self.logger.addHandler(
-            logging.FileHandler('/Users/petrov/ensime_plugin.log', 'w')
+            logging.FileHandler(
+                os.path.join(self.plugin_dir, 'pensive.log'), 'w')
         )
         self.logger.level = logging.DEBUG
 
     @neovim.command("EnsimeStart")
     def command_ensime_start(self):
 
-        plugin_dir = os.path.dirname(os.path.realpath(__file__))
-        start_script_path = os.path.join(plugin_dir, 'serverStart.sh')
+        start_script_path = os.path.join(self.plugin_dir, 'serverStart.sh')
         ensime_var = 'ENSIME_CONFIG=%s' % os.path.join(
             self.project_dir, '.ensime'
         )
