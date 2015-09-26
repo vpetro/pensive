@@ -97,7 +97,9 @@ class BasicTypeInfo(TypeInfo):
         return "[%s]" % ",".join(type_args)
 
     def run(self, vim):
-        self.output_buffer(vim).append(self.name + self._get_type_args())
+        result = self.name + self._get_type_args()
+        # self.output_buffer(vim).append(self.name + self._get_type_args())
+        vim.command("echom '%s'" % result)
 
     @classmethod
     def handles(cls, payload):
@@ -118,7 +120,8 @@ class ArrowTypeInfo(TypeInfo):
         self.outer_type_id = None
 
     def run(self, vim):
-        self.output_buffer(vim).append(self.name)
+        # self.output_buffer(vim).append(self.name)
+        vim.command("echom '%s'" % self.name)
 
     @classmethod
     def handles(cls, payload):
