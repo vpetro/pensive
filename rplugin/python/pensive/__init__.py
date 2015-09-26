@@ -40,9 +40,6 @@ class SocketClientThread(threading.Thread):
         import select
         while True:
             try:
-                # response = self._recv(None)
-                # if response:
-                #     continue
                 i, o, e = select.select([self.socket], [], [], 0)
                 # self.logger.debug('input from select %s' % str(i))
                 for s in i:
@@ -149,9 +146,10 @@ class SocketClientThread(threading.Thread):
             output_buffer.append(
                 str(command.response(parsed_command['payload']))
             )
-            command.response(
-                parsed_command['payload']
-            ).run(self.vim)
+            if getattr(command, 'response', None):
+                command.response(
+                    parsed_command['payload']
+                ).run(self.vim)
 
             output_buffer.append('end')
         except Exception as e:
@@ -189,6 +187,20 @@ class EnsimePlugin(object):
             logging.FileHandler('/Users/petrov/ensime_plugin.log', 'w')
         )
         self.logger.level = logging.DEBUG
+
+    @neovim.command("EnsimeStart")
+    def command_ensime_start(self):
+
+        plugin_dir = os.path.dirname(os.path.realpath(__file__))
+        start_script_path = os.path.join(plugin_dir, 'serverStart.sh')
+        ensime_var = 'ENSIME_CONFIG=%s' % os.path.join(
+            self.project_dir, '.ensime'
+        )
+        start_command = "%s %s" % (ensime_var, start_script_path)
+        self.logger.debug(start_command)
+
+        self.vim.command("botright new")
+        self.vim.command("call termopen([&sh, &shcf, '%s'])" % start_command)
 
     @neovim.command("EnsimeConnect")
     def command_ensime_connect(self):
