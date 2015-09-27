@@ -43,7 +43,8 @@ class ERangePositions(object):
                 )
             ),
             'lnum': line_num,
-            'col': offset
+            'col': offset,
+            'text': line
         }
         return d
 
@@ -57,7 +58,7 @@ class ERangePositions(object):
             self._create_quickfix_entry(pos) for pos in self.positions
         ]
         self.output_buffer(vim).append(str(qflist))
-        vim.eval("setqflist(%s)" % str(qflist))
+        vim.eval("setloclist(0, %s)" % str(qflist))
 
     @classmethod
     def fromJson(cls, payload):
