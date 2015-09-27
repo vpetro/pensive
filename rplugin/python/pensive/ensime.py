@@ -1,3 +1,4 @@
+import os
 import json
 
 
@@ -27,7 +28,6 @@ class ERangePositions(object):
         ]
 
     def _create_quickfix_entry(self, pos):
-        import os
         offset = pos.offset
         fh = open(pos.file, 'r')
         for line_num, line in enumerate(fh, 1):
