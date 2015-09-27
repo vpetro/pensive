@@ -8,6 +8,10 @@ import json
 import ensime
 
 
+PENSIVE_SOCKET_LOG = 'pensive-socket.log'
+PENSIVE_PLUGIN_LOG = 'pensive-plugin.log'
+
+
 def calculate_offset(line_offset, colnum):
     return int(line_offset) + int(colnum) - 1
 
@@ -15,9 +19,11 @@ def calculate_offset(line_offset, colnum):
 class SocketClientThread(threading.Thread):
     def __init__(self, vim, input_queue, output_queue, project_dir):
         super(SocketClientThread, self).__init__()
+        self.plugin_dir = os.path.dirname(os.path.realpath(__file__))
         self.logger = logging.getLogger(__name__)
         self.logger.addHandler(
-            logging.FileHandler('/Users/petrov/ensime.log', 'w')
+            logging.FileHandler(
+                os.path.join(self.plugin_dir, PENSIVE_SOCKET_LOG), 'w')
         )
         self.logger.level = logging.DEBUG
 
@@ -162,7 +168,7 @@ class EnsimePlugin(object):
         self.logger = logging.getLogger(str(self.__class__))
         self.logger.addHandler(
             logging.FileHandler(
-                os.path.join(self.plugin_dir, 'pensive.log'), 'w')
+                os.path.join(self.plugin_dir, PENSIVE_PLUGIN_LOG), 'w')
         )
         self.logger.level = logging.DEBUG
 
