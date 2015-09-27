@@ -185,11 +185,10 @@ class SymbolInfo(object):
         if df and tf and df == tf:
             self.decl_pos.goto(vim)
         else:
-            if self.decl_pos:
-                self.decl_pos.goto(vim)
-            # open a split with type declaration
             if self.type and self.type.pos:
                 self.type.pos.goto(vim)
+            elif self.decl_pos:
+                self.decl_pos.goto(vim)
 
 
 def add_class_name(d, cls):
