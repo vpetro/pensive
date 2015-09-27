@@ -48,17 +48,14 @@ class ERangePositions(object):
         }
         return d
 
-    def output_buffer(self, vim):
-        return [
-            b for b in vim.buffers if b.name.endswith("pensive")
-        ][0]
-
     def run(self, vim):
         qflist = [
             self._create_quickfix_entry(pos) for pos in self.positions
         ]
-        self.output_buffer(vim).append(str(qflist))
-        vim.eval("setloclist(0, %s)" % str(qflist))
+
+        if qflist:
+            vim.eval("setloclist(0, %s)" % str(qflist))
+            vim.command("lopen")
 
     @classmethod
     def fromJson(cls, payload):
