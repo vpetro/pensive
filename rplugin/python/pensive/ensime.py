@@ -1,5 +1,7 @@
 import os
 import json
+from operator import attrgetter
+from utils import QuickfixEntry
 
 
 class ResponseType(object):
@@ -243,7 +245,8 @@ class TypecheckFile(object):
         return add_class_name(self._request, self)
 
     def response(self, payload):
-        self._response = NewScalaNotesEvent(payload)
+        # self._response = NewScalaNotesEvent(payload)
+        self._response = Notification.fromJson(payload)
         return self._response
 
 
@@ -346,12 +349,26 @@ class NewScalaNotesEvent(Notification):
         return d
 
     def run(self, vim):
+        current_qf_list = vim.eval('getqflist()')
+        deref_qf_list = []
+
+        for d in current_qf_list:
+            d['file'] = vim.eval('bufname(%s)' % d['bufnr'])
+            deref_qf_list.append(d)
+
         qflist = [
-            self._create_quickfix_entry(pos) for pos in self.notes
+            QuickfixEntry.fromVim(i) for i in deref_qf_list
+        ] + [
+            QuickfixEntry.fromScalaNote(i) for i in self.notes
         ]
 
+        qflist = sorted(
+            list(set(qflist)),
+            key=attrgetter('filename', 'line_number', 'severity')
+        )
+
         if qflist:
-            vim.eval("setqflist(%s)" % str(qflist))
+            vim.eval("setqflist(%s)" % str([i.to_dict() for i in qflist]))
 
     @classmethod
     def handles(cls, payload):
