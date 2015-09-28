@@ -15,6 +15,14 @@ class ResponseType(object):
             yield c
 
 
+class VoidResponse(object):
+    def __init__(self, payload):
+        pass
+
+    def run(self, vim):
+        pass
+
+
 class ERangePosition(object):
     def __init__(self, payload):
         self.file = payload['file']
@@ -218,7 +226,7 @@ class TypecheckAll(object):
         return add_class_name(self._request, self)
 
     def response(self, payload):
-        self._response = json.loads(payload)
+        self._response = VoidResponse(payload)
         return self._response
 
 
@@ -234,8 +242,8 @@ class TypecheckFile(object):
         }
         return add_class_name(self._request, self)
 
-    def response(self, content):
-        self._response = json.loads(content)
+    def response(self, payload):
+        self._response = NewScalaNotesEvent(payload)
         return self._response
 
 
@@ -309,3 +317,79 @@ class ImplicitInfo(object):
     def response(self, payload):
         self._response = payload
         return self._response
+
+
+class Notification(ResponseType):
+    def __init__(self, parsed_command):
+        self.parsed_command = parsed_command
+
+
+class NewScalaNotesEvent(Notification):
+    def __init__(self, parsed_command):
+        super(NewScalaNotesEvent, self).__init__(parsed_command)
+        self.notes = self.parsed_command['notes']
+
+    def _create_quickfix_entry(self, pos):
+        severities = {
+            'NoteError': 'E',
+            'NoteWarning': 'W'
+        }
+
+        d = {
+            'filename': str(pos['file']),
+            'lnum': pos['line'],
+            'col': pos['col'],
+            'text': str(pos['msg']),
+            'type': severities.get(pos['severity']['typehint'], '')
+        }
+
+        return d
+
+    def run(self, vim):
+        qflist = [
+            self._create_quickfix_entry(pos) for pos in self.notes
+        ]
+
+        if qflist:
+            vim.eval("setqflist(%s)" % str(qflist))
+
+    @classmethod
+    def handles(cls, payload):
+        return payload.get('typehint', '') == 'NewScalaNotesEvent'
+
+
+class ClearScalaNotes(Notification):
+    def run(self, vim):
+        vim.command("echom 'Cleared Scala notes'")
+        vim.eval('setqflist([])')
+
+    @classmethod
+    def handles(cls, payload):
+        return payload.get('typehint', '') == 'ClearAllScalaNotesEvent'
+
+
+class IndexerReady(Notification):
+    def run(self, vim):
+        vim.command("echom 'Indexer Ready'")
+
+    @classmethod
+    def handles(cls, payload):
+        return payload.get('typehint', '') == 'IndexerReadyEvent'
+
+
+class AnalyzerReady(Notification):
+    def run(self, vim):
+        vim.command("echom 'Analyzer Ready'")
+
+    @classmethod
+    def handles(cls, payload):
+        return payload.get('typehint', '') == 'AnalyzerReadyEvent'
+
+
+class FullTypeCheckComplete(Notification):
+    def run(self, vim):
+        vim.command("echom 'Full Typecheck Complete'")
+
+    @classmethod
+    def handles(cls, payload):
+        return payload.get('typehint', '') == 'FullTypeCheckCompleteEvent'

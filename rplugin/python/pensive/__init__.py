@@ -106,6 +106,9 @@ class SocketClientThread(threading.Thread):
         self.logger.debug('calling update')
         result = self.output_queue.get()
         self.logger.debug('output queue result: %s' % str(result))
+        # output_buffer = [
+        #     b for b in self.vim.buffers if b.name.endswith("pensive")
+        # ][0]
         parsed_command = json.loads(result)
         command_id = None
         command_type = parsed_command['typehint']
@@ -114,32 +117,34 @@ class SocketClientThread(threading.Thread):
 
         command = None
         if command_id is not None:
+            self.logger.debug('found comand with id: %d' % command_id)
             command_name = self.history[command_id]
+            self.logger.debug(
+                'command id (%d) matched with command name: (%s)' % (
+                    command_id, command_name
+                )
+            )
+            # output_buffer.append('command_name: %s' % command_name)
             command = getattr(ensime, command_name)()
 
-        output_buffer = [
-            b for b in self.vim.buffers if b.name.endswith("pensive")
-        ][0]
         output = result
 
         try:
-            output_buffer.append('start')
-            output_buffer.append(str(command.__class__.__name__))
-            output_buffer.append('creating response')
-            output_buffer.append(
-                str(command.response(parsed_command['payload']))
-            )
             if getattr(command, 'response', None):
                 command.response(
                     parsed_command['payload']
                 ).run(self.vim)
+            else:
+                ensime.Notification.fromJson(
+                    parsed_command
+                ).run(self.vim)
 
-            output_buffer.append('end')
         except Exception as e:
-            output_buffer.append(str(e))
+            self.logger.debug(str(e))
+            # output_buffer.append(str(e))
 
-        output_buffer.append(result)
-        output_buffer.append(output)
+        # output_buffer.append(result)
+        # output_buffer.append(output)
 
     def _connect(self, project_dir):
         line = open(
@@ -187,16 +192,17 @@ class EnsimePlugin(object):
 
     @neovim.command("EnsimeConnect")
     def command_ensime_connect(self):
-        has_pensive_buffer = len(
-            [b.name for b in self.vim.buffers if b.name.endswith("pensive")]
-        ) > 0
-        if not has_pensive_buffer:
-            self.vim.command("new pensive")
-            self.vim.command("resize 10")
-            self.vim.command("setlocal buftype=nofile")
-            self.vim.command("setlocal bufhidden=hide")
-            self.vim.command("setlocal noswapfile")
-            self.vim.command("setlocal filetype=scala")
+        # has_pensive_buffer = len(
+        #     [b.name for b in self.vim.buffers if b.name.endswith("pensive")]
+        # ) > 0
+        # if not has_pensive_buffer:
+        #     self.vim.command("new pensive")
+        #     self.vim.command("resize 10")
+        #     self.vim.command("setlocal buftype=nofile")
+        #     self.vim.command("setlocal bufhidden=hide")
+        #     self.vim.command("setlocal noswapfile")
+        #     self.vim.command("setlocal filetype=scala")
+
         self.client = SocketClientThread(
             self.vim,
             self.input_queue,
