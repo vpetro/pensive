@@ -56,13 +56,6 @@ class QuickfixEntry(object):
 
     @classmethod
     def fromScalaNote(cls, payload):
-        # def get_severity(payload):
-        #     severity = payload.get('severity', None)
-        #     if not severity:
-        #         return
-        #     severity_type = severity.get('typehint', None)
-        #     return severity_type
-
         entry = QuickfixEntry()
         entry.filename = str(payload['file'])
         entry.line_number = payload['line']
