@@ -85,7 +85,7 @@ class TypeInfo(ResponseType):
 class BasicTypeInfo(TypeInfo):
     def __init__(self, payload):
         self.name = payload['name']
-        self.type_id = payload['typeId']
+        # self.type_id = payload['typeId']
         self.decl_as = None
         self.full_name = payload['fullName']
         self.type_args = [
@@ -100,12 +100,12 @@ class BasicTypeInfo(TypeInfo):
         if not self.type_args:
             return ''
         type_args = [
-            "%s%s" % (t.name, t._get_type_args()) for t in self.type_args
+            "%s%s" % (t.full_name, t._get_type_args()) for t in self.type_args
         ]
         return "[%s]" % ",".join(type_args)
 
     def run(self, vim):
-        result = self.name + self._get_type_args()
+        result = self.full_name + self._get_type_args()
         # self.output_buffer(vim).append(self.name + self._get_type_args())
         vim.command("echom '%s'" % result)
 
@@ -118,7 +118,7 @@ class ArrowTypeInfo(TypeInfo):
     def __init__(self, payload):
         self.name = payload['name']
         self.full_name = payload['resultType']['fullName']
-        self.type_id = payload['typeId']
+        # self.type_id = payload['typeId']
         self.result_type = TypeInfo.fromJson(payload['resultType'])
         self.param_sections = None
         self.decl_as = None
@@ -218,6 +218,19 @@ class UnloadAll(object):
         return self._response
 
 
+class ConnectionInfo(object):
+    typehint = "ConnectionInfoReq"
+    _request = None
+    _response = None
+
+    def request(self):
+        self._request = {"typehint": self.typehint}
+        return add_class_name(self._request, self)
+
+    def response(self):
+        pass
+
+
 class TypecheckAll(object):
     typehint = "TypecheckAllReq"
     _request = None
@@ -233,14 +246,14 @@ class TypecheckAll(object):
 
 
 class TypecheckFile(object):
-    typehint = "TypecheckFileReq"
+    typehint = "TypecheckFilesReq"
     _request = None
     _response = None
 
     def request(self, path):
         self._request = {
             "typehint": self.typehint,
-            "fileInfo": {"file": path}
+            "files": [path]
         }
         return add_class_name(self._request, self)
 

@@ -77,7 +77,6 @@ class SocketClientThread(threading.Thread):
 
     def _recv(self, command):
         # get the lenght of incoming message from ensime
-        self.logger.debug('receiving...')
         msglen = self.socket.recv(6)
         if msglen:
             msglen = int(msglen, 16)
@@ -110,10 +109,10 @@ class SocketClientThread(threading.Thread):
         #     b for b in self.vim.buffers if b.name.endswith("pensive")
         # ][0]
         parsed_command = json.loads(result)
-        command_id = None
-        command_type = parsed_command['typehint']
-        if command_type == 'RpcResponseEnvelope':
-            command_id = parsed_command['callId']
+        # command_id = None
+        # command_type = parsed_command['typehint']
+        # if command_type == 'RpcResponseEnvelope':
+        command_id = parsed_command['callId']
 
         command = None
         if command_id is not None:
@@ -126,8 +125,6 @@ class SocketClientThread(threading.Thread):
             )
             # output_buffer.append('command_name: %s' % command_name)
             command = getattr(ensime, command_name)()
-
-        output = result
 
         try:
             if getattr(command, 'response', None):
@@ -210,6 +207,13 @@ class EnsimePlugin(object):
             self.project_dir
         )
         self.client.start()
+        # send the ConnectionInfoReq Ensime expects when started
+        self.input_queue.put(('send', ensime.ConnectionInfo().request()))
+
+    @neovim.command("EnsimeConnectionInfo", sync=True)
+    def command_connection_info(self):
+        command = ensime.ConnectionInfo().request()
+        self.input_queue.put(('send', command))
 
     @neovim.command("EnsimeUnloadAll", sync=True)
     def command_unload_all(self):
