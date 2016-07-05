@@ -112,7 +112,7 @@ class SocketClientThread(threading.Thread):
         # command_id = None
         # command_type = parsed_command['typehint']
         # if command_type == 'RpcResponseEnvelope':
-        command_id = parsed_command['callId']
+        command_id = parsed_command.get('callId')
 
         command = None
         if command_id is not None:
@@ -132,8 +132,13 @@ class SocketClientThread(threading.Thread):
                     parsed_command['payload']
                 ).run(self.vim)
             else:
+                self.logger.debug(
+                    'possible notfication: %s' % (
+                        parsed_command
+                    )
+                )
                 ensime.Notification.fromJson(
-                    parsed_command
+                    parsed_command['payload']
                 ).run(self.vim)
 
         except Exception as e:

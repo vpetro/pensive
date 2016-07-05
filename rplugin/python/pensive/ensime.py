@@ -317,6 +317,27 @@ class UsesOfSymbolAtPoint(object):
         return self._response
 
 
+class CompletionsReq(object):
+    typehint = "CompletionsReq"
+    _request = None
+    _response = None
+
+    def request(self, path, pos):
+        self._request = {
+            "typehint": self.typehint,
+            "file": path,
+            "point": pos
+        }
+        return add_class_name(self._request, self)
+
+    def response(self, payload):
+        self._response = CompletionInfos(payload)
+        return self._response
+
+    def response(self, payload):
+        return self._response
+
+
 class ImplicitInfo(object):
     typehint = "ImplicitInfoReq"
     _request = None
