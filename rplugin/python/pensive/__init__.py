@@ -109,9 +109,6 @@ class SocketClientThread(threading.Thread):
         #     b for b in self.vim.buffers if b.name.endswith("pensive")
         # ][0]
         parsed_command = json.loads(result)
-        # command_id = None
-        # command_type = parsed_command['typehint']
-        # if command_type == 'RpcResponseEnvelope':
         command_id = parsed_command.get('callId')
 
         command = None
