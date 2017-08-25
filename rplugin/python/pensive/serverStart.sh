@@ -11,7 +11,7 @@
 #
 # [1] https://github.com/paulp/sbt-extras/blob/master/sbt
 
-ENSIME_VERSION="0.9.10-SNAPSHOT"
+ENSIME_VERSION="2.0.0-SNAPSHOT"
 
 # # borrowed from http://stackoverflow.com/questions/3466166/how-to-check-if-running-in-cygwin-mac-or-linux
 # if [ "$(uname)" == "Darwin" ]; then # Mac
@@ -98,7 +98,7 @@ saveClasspathTask := {
 EOF
 
 cat <<EOF > "$RESOLUTION_DIR/project/build.properties"
-sbt.version=0.13.8
+sbt.version=0.13.15
 EOF
 
 echo "Changing to $RESOLUTION_DIR"
@@ -111,4 +111,4 @@ CLASSPATH="$JDK_HOME/lib/tools.jar:`cat $CLASSPATH_FILE`"
 echo "  -> Starting ENSIME"
 cd "$ENSIME_CACHE"
 
-exec "$JAVA" -classpath "$CLASSPATH" $JAVA_FLAGS -Densime.protocol=jerk -Densime.config="$ENSIME_CONFIG" org.ensime.server.Server
+exec "$JAVA" -classpath "$CLASSPATH" $JAVA_FLAGS -Densime.config="$ENSIME_CONFIG" org.ensime.server.Server
