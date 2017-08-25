@@ -16,6 +16,33 @@ def calculate_offset(line_offset, colnum):
     return int(line_offset) + int(colnum) - 1
 
 
+class Position(object):
+    def __init__(self, vim, line, num):
+        self.line, self.col = line, num
+        self.offset = self.calculate_offset()
+
+    def calculate_offset(self):
+        line_byte_pos = self.vim.eval('line2byte({0})'.format(self.line))
+        offset = int(line_byte_pos) + int(self.col)
+        return offset
+
+
+class PointPosition(Position):
+    pass
+
+
+class RangePosition(object):
+    def __init__(self, vim, start_line, start_col, end_line, end_col):
+        self.start = Position(vim, start_line, start_col)
+        self.end = Position(vim, end_line, end_col - 2)
+
+
+def to_ensime_pos(vim, line_num, col_num):
+    line_byte_pos = vim.eval('line2byte({0})'.format(line_num))
+    offset = calculate_offset(line_byte_pos, col_num)
+    return offset
+
+
 class SocketClientThread(threading.Thread):
     def __init__(self, vim, input_queue, output_queue, project_dir):
         super(SocketClientThread, self).__init__()
@@ -240,6 +267,22 @@ class EnsimePlugin(object):
         line_byte_pos = self.vim.eval('line2byte({0})'.format(line_number))
         command = ensime.TypeAtPoint().request(
             filename, calculate_offset(line_byte_pos, col_number))
+        self.input_queue.put(('send', command))
+
+    @neovim.command("EnsimeTypeOfSelection", sync=False)
+    def command_type_of_selection(self):
+        filename = self.vim.current.buffer.name
+        start_line_number, start_col_number = self.vim.eval(
+            'getpos("\'<")')[1:3]
+        end_line_number, end_col_number = self.vim.eval('getpos("\'>")')[1:3]
+        start_line_byte_pos = self.vim.eval('line2byte({0})'.format(
+            start_line_number))
+        end_line_byte_pos = self.vim.eval('line2byte({0})'.format(
+            end_line_number))
+        command = ensime.TypeOfSelection().request(
+            filename,
+            calculate_offset(start_line_byte_pos, start_col_number),
+            calculate_offset(end_line_byte_pos, end_col_number - 1))
         self.input_queue.put(('send', command))
 
     @neovim.command("EnsimeSymbolAtPoint", sync=False)

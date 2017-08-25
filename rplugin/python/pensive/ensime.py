@@ -105,7 +105,7 @@ class BasicTypeInfo(TypeInfo):
         return "[%s]" % ",".join(type_args)
 
     def run(self, vim):
-        result = self.full_name + self._get_type_args()
+        result = self.full_name
         # self.output_buffer(vim).append(self.name + self._get_type_args())
         vim.command("echom '%s'" % result)
 
@@ -273,6 +273,24 @@ class TypeAtPoint(object):
             "typehint": self.typehint,
             "file": path,
             "range": {"from": pos, "to": pos}
+        }
+        return add_class_name(self._request, self)
+
+    def response(self, payload):
+        self._response = TypeInfo.fromJson(payload)
+        return self._response
+
+
+class TypeOfSelection(object):
+    typehint = "TypeAtPointReq"
+    _request = None
+    _response = None
+
+    def request(self, path, start, end):
+        self._request = {
+            "typehint": self.typehint,
+            "file": path,
+            "range": {"from": start, "to": end}
         }
         return add_class_name(self._request, self)
 
