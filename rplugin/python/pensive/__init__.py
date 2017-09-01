@@ -55,6 +55,7 @@ class EnsimeClient(object):
                 target=self.recv)
             self.thread.daemon = True
             self.thread.start()
+            self.send(ensime.ConnectionInfo().request())
         else:
             self.logger.debug("attempted to start while already running")
             pass
