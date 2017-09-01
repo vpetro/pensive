@@ -3,6 +3,11 @@ import json
 from operator import attrgetter
 from utils import QuickfixEntry
 
+import logging
+
+
+PENSIVE_COMMAND_LOG = 'pensive-command.log'
+
 
 class ResponseType(object):
     @classmethod
@@ -177,12 +182,25 @@ class LineSourcePosition(SourcePosition):
 
 class SymbolInfo(object):
     def __init__(self, payload):
-        self.name = payload['name']
-        self.local_name = payload['localName']
+        self.plugin_dir = os.path.dirname(os.path.realpath(__file__))
+        self.logger = logging.getLogger(__name__)
+        self.logger.addHandler(
+            logging.FileHandler(
+                os.path.join(self.plugin_dir, PENSIVE_COMMAND_LOG), 'w')
+        )
+        self.logger.level = logging.DEBUG
+        self.name = payload.get('name')
+        self.logger.debug("name: %s" % self.name)
+        self.local_name = payload.get('localName')
+        self.logger.debug("local_name: %s" % self.local_name)
         self.decl_pos = SourcePosition.fromJson(payload.get('declPos'))
-        self.type = TypeInfo.fromJson(payload['type'])
-        self.is_callable = payload['isCallable']
+        self.logger.debug("decl_pos: %s" % self.decl_pos)
+        self.type = TypeInfo.fromJson(payload.get('type'))
+        self.logger.debug("type: %s" % self.type)
+        self.is_callable = payload.get('isCallable')
+        self.logger.debug("is_callable: %s" % self.is_callable)
         self.owner_type_id = payload.get('ownerTypeId')
+        self.logger.debug("owner_type_id: %s" % self.owner_type_id)
 
     def run(self, vim):
         # if the symbol declaration is the same as the type position
@@ -335,25 +353,25 @@ class UsesOfSymbolAtPoint(object):
         return self._response
 
 
-class CompletionsReq(object):
-    typehint = "CompletionsReq"
-    _request = None
-    _response = None
+# class CompletionsReq(object):
+#     typehint = "CompletionsReq"
+#     _request = None
+#     _response = None
 
-    def request(self, path, pos):
-        self._request = {
-            "typehint": self.typehint,
-            "file": path,
-            "point": pos
-        }
-        return add_class_name(self._request, self)
+#     def request(self, path, pos):
+#         self._request = {
+#             "typehint": self.typehint,
+#             "file": path,
+#             "point": pos
+#         }
+#         return add_class_name(self._request, self)
 
-    def response(self, payload):
-        self._response = CompletionInfos(payload)
-        return self._response
+#     def response(self, payload):
+#         self._response = CompletionInfos(payload)
+#         return self._response
 
-    def response(self, payload):
-        return self._response
+#     def response(self, payload):
+#         return self._response
 
 
 class ImplicitInfo(object):

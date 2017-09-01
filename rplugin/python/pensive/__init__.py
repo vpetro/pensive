@@ -1,52 +1,32 @@
-import socket
-import threading
-import Queue
-import os.path
-import logging
-import neovim
 import json
+import os.path
+from threading import Thread
+from websocket import create_connection
+import Queue
+import neovim
 import ensime
+import logging
 
-
-PENSIVE_SOCKET_LOG = 'pensive-socket.log'
-PENSIVE_PLUGIN_LOG = 'pensive-plugin.log'
+PENSIVE_SOCKET_LOG = 'pensive.log'
 
 
 def calculate_offset(line_offset, colnum):
     return int(line_offset) + int(colnum) - 1
 
 
-class Position(object):
-    def __init__(self, vim, line, num):
-        self.line, self.col = line, num
-        self.offset = self.calculate_offset()
-
-    def calculate_offset(self):
-        line_byte_pos = self.vim.eval('line2byte({0})'.format(self.line))
-        offset = int(line_byte_pos) + int(self.col)
-        return offset
-
-
-class PointPosition(Position):
-    pass
-
-
-class RangePosition(object):
-    def __init__(self, vim, start_line, start_col, end_line, end_col):
-        self.start = Position(vim, start_line, start_col)
-        self.end = Position(vim, end_line, end_col - 2)
-
-
-def to_ensime_pos(vim, line_num, col_num):
-    line_byte_pos = vim.eval('line2byte({0})'.format(line_num))
-    offset = calculate_offset(line_byte_pos, col_num)
-    return offset
-
-
-class SocketClientThread(threading.Thread):
-    def __init__(self, vim, input_queue, output_queue, project_dir):
-        super(SocketClientThread, self).__init__()
+@neovim.plugin
+class EnsimeClient(object):
+    def __init__(self, vim):
+        self.vim = vim
         self.plugin_dir = os.path.dirname(os.path.realpath(__file__))
+        self.project_dir = os.path.abspath(os.path.curdir)
+        self.is_running = False
+        self.ws = None
+        self.thread = None
+        self.queue = Queue.Queue()
+        self.call_id = 0
+        self.history = {}
+
         self.logger = logging.getLogger(__name__)
         self.logger.addHandler(
             logging.FileHandler(
@@ -54,211 +34,97 @@ class SocketClientThread(threading.Thread):
         )
         self.logger.level = logging.DEBUG
 
-        self.vim = vim
-        self.input_queue = input_queue
-        self.output_queue = output_queue
-        self.command_counter = 1
-        self.socket = None
-        self._connect(project_dir)
+    @neovim.command("EnsimeConnect")
+    def connect(self):
+        if not self.is_running:
+            self.port = int(open(
+                os.path.join(self.project_dir, ".ensime_cache/http"), "r"
+            ).read().strip())
+            self.url = "ws://127.0.0.1:{}/websocket".format(self.port)
+            self.options = {
+                'subprotocols': ['jerky'],
+                'enable_multithread': True
+            }
+            self.ws = create_connection(
+                self.url,
+                **self.options
+            )
+            self.is_running = True
+            self.thread = Thread(
+                name='recv',
+                target=self.recv)
+            self.thread.daemon = True
+            self.thread.start()
+        else:
+            self.logger.debug("attempted to start while already running")
+            pass
+            print 'already running'
 
-        self.handlers = {
-            'send': self._send,
-            'recv': self._recv,
+    def send(self, message):
+        self.call_id += 1
+        filtered_message = {
+            k: v for k, v in message.iteritems()
         }
 
-        self.history = {}
+        command_name = filtered_message.pop('__name__')
+        payload = {
+            'callId': self.call_id,
+            'req': filtered_message
+        }
+        self.history[self.call_id] = command_name
+        self.ws.send(json.dumps(payload))
+        return message
 
-    def run(self):
-        import select
-        while True:
+    def recv(self):
+        while self.is_running:
             try:
-                i, o, e = select.select([self.socket], [], [], 0)
-                # self.logger.debug('input from select %s' % str(i))
-                for s in i:
-                    if s == self.socket:
-                        self._recv(None)
-
-                (cmd, data) = self.input_queue.get(True, 0.1)
-                self.logger.debug('cmd: %s' % cmd)
-                self.logger.debug('data: %s' % data)
-                self.handlers[cmd](data)
-            except Queue.Empty:
-                # self.logger.debug('empty queue exception')
-                continue
+                message = self.ws.recv()
+                parsed = json.loads(message)
+                self.queue.put(parsed)
+                self.vim.session.threadsafe_call(self.update)
             except Exception as e:
-                self.logger.debug("other exception: %s" % str(e))
-                continue
+                self.logger.debug("recv exception: %s" % str(e))
 
-    def _send(self, command):
-        command_name = command.pop('__name__')
-        wrapped_command = json.dumps(
-            {"callId": self.command_counter, "req": command}
-        )
-        request = "{0}{1}".format(
-            "%06x" % len(wrapped_command), wrapped_command
-        )
-        self.logger.debug(request)
-        self.socket.send(request)
-        self.history[self.command_counter] = command_name
-        self.command_counter += 1
-
-    def _recv(self, command):
-        # get the lenght of incoming message from ensime
-        msglen = self.socket.recv(6)
-        if msglen:
-            msglen = int(msglen, 16)
-            self.logger.debug("got msglen")
-
-            buf = ""
-            while len(buf) < msglen:
-                chunk = self.socket.recv(msglen - len(buf))
-                self.logger.debug("chunk: %s" % chunk)
-                if chunk:
-                    buf += chunk
-                else:
-                    self.logger.error(
-                        "recv returned None while reading from socket"
-                    )
-                    raise Exception(
-                        "recv returned None while reading from socket"
-                    )
-            response = buf.decode('utf-8').replace('\n', '').replace('\t', '')
-            self.output_queue.put(response)
-            self.vim.session.threadsafe_call(self._update)
-            return response
-        return 'invalid message'
-
-    def _update(self):
-        self.logger.debug('calling update')
-        result = self.output_queue.get()
-        self.logger.debug('output queue result: %s' % str(result))
-        # output_buffer = [
-        #     b for b in self.vim.buffers if b.name.endswith("pensive")
-        # ][0]
-        parsed_command = json.loads(result)
-        command_id = parsed_command.get('callId')
-
-        command = None
-        if command_id is not None:
-            self.logger.debug('found comand with id: %d' % command_id)
-            command_name = self.history[command_id]
-            self.logger.debug(
-                'command id (%d) matched with command name: (%s)' % (
-                    command_id, command_name
-                )
-            )
-            # output_buffer.append('command_name: %s' % command_name)
-            command = getattr(ensime, command_name)()
-
+    def update(self):
         try:
-            if getattr(command, 'response', None):
-                command.response(
-                    parsed_command['payload']
-                ).run(self.vim)
+            result = self.queue.get(True, 0.1)
+            self.logger.debug("receive: %s" % json.dumps(result))
+            call_id = result.get('callId')
+            if call_id is not None:
+                command_name = self.history[call_id]
+                self.logger.debug("command_name: %s" % str(command_name))
+                command = getattr(ensime, command_name)()
+                self.logger.debug("command: %s" % str(command))
+
+                if getattr(command, 'response', None):
+                    self.logger.debug("command: executing response")
+                    command.response(
+                        result['payload']
+                    ).run(self.vim)
+                    self.logger.debug("command: executed response")
+                else:
+                    self.logger("Warning: command has no 'response'")
             else:
-                self.logger.debug(
-                    'possible notfication: %s' % (
-                        parsed_command
-                    )
-                )
                 ensime.Notification.fromJson(
-                    parsed_command['payload']
+                    result['payload']
                 ).run(self.vim)
 
+        except Queue.Empty:
+            pass
         except Exception as e:
-            self.logger.debug(str(e))
-            # output_buffer.append(str(e))
-
-        # output_buffer.append(result)
-        # output_buffer.append(output)
-
-    def _connect(self, project_dir):
-        line = open(
-            os.path.join(project_dir, ".ensime_cache/port"), "r"
-        ).read().strip()
-        port = int(line)
-
-        self.logger.debug('got the port %d' % port)
-        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.socket.connect(('127.0.0.1', port))
-        self.logger.debug('connected to server')
-
-    def join(self, timeout=None):
-        threading.Thread.join(self, timeout)
-
-
-@neovim.plugin
-class EnsimePlugin(object):
-    def __init__(self, vim):
-        self.vim = vim
-        self.project_dir = os.path.abspath(os.path.curdir)
-        self.plugin_dir = os.path.dirname(os.path.realpath(__file__))
-        self.input_queue = Queue.Queue()
-        self.output_queue = Queue.Queue()
-
-        self.logger = logging.getLogger(str(self.__class__))
-        self.logger.addHandler(
-            logging.FileHandler(
-                os.path.join(self.plugin_dir, PENSIVE_PLUGIN_LOG), 'w')
-        )
-        self.logger.level = logging.DEBUG
-
-    @neovim.command("EnsimeStart")
-    def command_ensime_start(self):
-
-        start_script_path = os.path.join(self.plugin_dir, 'serverStart.sh')
-        ensime_var = 'ENSIME_CONFIG=%s' % os.path.join(
-            self.project_dir, '.ensime'
-        )
-        start_command = "%s %s" % (ensime_var, start_script_path)
-        self.logger.debug(start_command)
-
-        self.vim.command("botright new")
-        self.vim.command("call termopen([&sh, &shcf, '%s'])" % start_command)
-
-    @neovim.command("EnsimeConnect")
-    def command_ensime_connect(self):
-        # has_pensive_buffer = len(
-        #     [b.name for b in self.vim.buffers if b.name.endswith("pensive")]
-        # ) > 0
-        # if not has_pensive_buffer:
-        #     self.vim.command("new pensive")
-        #     self.vim.command("resize 10")
-        #     self.vim.command("setlocal buftype=nofile")
-        #     self.vim.command("setlocal bufhidden=hide")
-        #     self.vim.command("setlocal noswapfile")
-        #     self.vim.command("setlocal filetype=scala")
-
-        self.client = SocketClientThread(
-            self.vim,
-            self.input_queue,
-            self.output_queue,
-            self.project_dir
-        )
-        self.client.start()
-        # send the ConnectionInfoReq Ensime expects when started
-        self.input_queue.put(('send', ensime.ConnectionInfo().request()))
+            self.logger.debug("update exception: %s" % str(e))
+        return result
 
     @neovim.command("EnsimeConnectionInfo", sync=True)
     def command_connection_info(self):
         command = ensime.ConnectionInfo().request()
-        self.input_queue.put(('send', command))
-
-    @neovim.command("EnsimeUnloadAll", sync=True)
-    def command_unload_all(self):
-        command = ensime.UnloadAll().request()
-        self.input_queue.put(('send', command))
-
-    @neovim.command("EnsimeTypecheckAll", sync=True)
-    def command_typecheck_all(self):
-        command = ensime.TypecheckAll().request()
-        self.input_queue.put(('send', command))
+        self.send(command)
 
     @neovim.command("EnsimeTypecheckFile", sync=True)
     def command_typecheck_file(self):
         filename = self.vim.current.buffer.name
         command = ensime.TypecheckFile().request(filename)
-        self.input_queue.put(('send', command))
+        self.send(command)
 
     @neovim.command("EnsimeTypeAtPoint", sync=False)
     def command_type_at_point(self):
@@ -267,7 +133,7 @@ class EnsimePlugin(object):
         line_byte_pos = self.vim.eval('line2byte({0})'.format(line_number))
         command = ensime.TypeAtPoint().request(
             filename, calculate_offset(line_byte_pos, col_number))
-        self.input_queue.put(('send', command))
+        self.send(command)
 
     @neovim.command("EnsimeTypeOfSelection", sync=False)
     def command_type_of_selection(self):
@@ -283,7 +149,7 @@ class EnsimePlugin(object):
             filename,
             calculate_offset(start_line_byte_pos, start_col_number),
             calculate_offset(end_line_byte_pos, end_col_number - 1))
-        self.input_queue.put(('send', command))
+        self.send(command)
 
     @neovim.command("EnsimeSymbolAtPoint", sync=False)
     def command_symbol_at_point(self):
@@ -293,54 +159,14 @@ class EnsimePlugin(object):
         command = ensime.SymbolAtPoint().request(
             filename, calculate_offset(line_byte_pos, col_number)
         )
-        self.logger.debug(command)
-        self.input_queue.put(('send', command))
-
-    @neovim.command("EnsimeUsesOfSymbolAtPoint", sync=False)
-    def command_uses_of_symbol_at_point(self):
-        filename = self.vim.current.buffer.name
-        line_number, col_number = self.vim.eval('getpos(".")')[1:3]
-        line_byte_pos = self.vim.eval('line2byte({0})'.format(line_number))
-        command = ensime.UsesOfSymbolAtPoint().request(
-            filename, calculate_offset(line_byte_pos, col_number)
-        )
-        self.logger.debug(command)
-        self.input_queue.put(('send', command))
-
-    @neovim.command("EnsimeImplicitInfo", sync=False)
-    def command_implicit_info(self):
-        filename = self.vim.current.buffer.name
-        line_number, col_number = self.vim.eval('getpos(".")')[1:3]
-        start = self.vim.eval('line2byte({0})'.format(line_number))
-        end = start + len(self.vim.current.line) - 1
-        command = ensime.ImplicitInfo().request(
-            filename, start, end
-        )
-        self.input_queue.put(('send', command))
+        self.logger.debug('sending: %s' % json.dumps(command))
+        self.send(command)
 
 
-def start():
+def main():
+    project_dir = '/Users/petrov/work/internal/bamboo-openair'
     import neovim
     vim = neovim.attach('socket', path='/tmp/v')
-
-    input_queue = Queue.Queue()
-    output_queue = Queue.Queue()
-    project_dir = os.path.abspath(os.path.curdir)
-    client = SocketClientThread(vim, input_queue, output_queue, project_dir)
-    client.start()
-
-
-if __name__ == "__main__":
-    # start()
-    import time
-
-    import neovim
-    vim = neovim.attach('socket', path='/tmp/v')
-
-    input_queue = Queue.Queue()
-    output_queue = Queue.Queue()
-    project_dir = os.path.abspath(os.path.curdir)
-    client = SocketClientThread(vim, input_queue, output_queue, project_dir)
-    client.start()
-    while True:
-        time.sleep(2)
+    client = EnsimeClient(project_dir, vim)
+    client.connect()
+    return client
